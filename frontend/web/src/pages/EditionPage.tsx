@@ -1,0 +1,390 @@
+import { Link, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
+import {
+  assetUrl,
+  fetchEdition,
+  fetchEditionPages,
+  fetchAllStickers,
+  updateStickerCollection,
+  type AlbumPageRow,
+  type Edition,
+  type StickerSlot,
+} from '../api';
+
+const CATEGORY_PT: Record<string, string> = {
+  player: 'Jogador',
+  team_photo: 'Foto equipe',
+  logo: 'Escudo',
+  stadium: 'Estádio',
+  mascot: 'Mascote',
+  legend: 'Lenda',
+  foil: 'Especial / foil',
+  trophy: 'Troféu',
+  intro: 'Intro',
+  poster: 'Pôster',
+  other: 'Outro',
+};
+
+function categoryLabel(c: string): string {
+  return CATEGORY_PT[c] ?? c;
+}
+
+type EditionTheme = {
+  accent: string;
+  accentDim: string;
+  gold: string;
+  surface: string;
+  surfaceHover: string;
+  visualStart: string;
+  visualEnd: string;
+  heroStart: string;
+  heroEnd: string;
+};
+
+const DEFAULT_THEME: EditionTheme = {
+  accent: '#34d399',
+  accentDim: 'rgba(52, 211, 153, 0.15)',
+  gold: '#fbbf24',
+  surface: '#141d2e',
+  surfaceHover: '#1a2740',
+  visualStart: '#1e293b',
+  visualEnd: '#0f172a',
+  heroStart: 'rgba(11, 18, 32, 0.86)',
+  heroEnd: 'rgba(11, 18, 32, 0.92)',
+};
+
+const EDITION_THEMES: Record<string, EditionTheme> = {
+  'fwc-2014': {
+    accent: '#16a34a',
+    accentDim: 'rgba(22, 163, 74, 0.18)',
+    gold: '#facc15',
+    surface: '#10261f',
+    surfaceHover: '#143328',
+    visualStart: '#1a5f3a',
+    visualEnd: '#0c3322',
+    heroStart: 'rgba(12, 51, 34, 0.74)',
+    heroEnd: 'rgba(10, 22, 17, 0.92)',
+  },
+  'fwc-2018-int': {
+    accent: '#ef4444',
+    accentDim: 'rgba(239, 68, 68, 0.16)',
+    gold: '#f59e0b',
+    surface: '#2a0f16',
+    surfaceHover: '#391420',
+    visualStart: '#7f1d1d',
+    visualEnd: '#3f0d12',
+    heroStart: 'rgba(127, 29, 29, 0.68)',
+    heroEnd: 'rgba(46, 15, 24, 0.9)',
+  },
+  'fwc-2022': {
+    accent: '#e11d48',
+    accentDim: 'rgba(225, 29, 72, 0.18)',
+    gold: '#fbbf24',
+    surface: '#2a1021',
+    surfaceHover: '#3a1630',
+    visualStart: '#6f1236',
+    visualEnd: '#2e0f24',
+    heroStart: 'rgba(111, 18, 54, 0.68)',
+    heroEnd: 'rgba(31, 11, 25, 0.92)',
+  },
+};
+
+const COVER_OVERRIDE_BY_SLUG: Record<string, string> = {
+  'fwc-2014': '/2014.jpg',
+  'fwc-2018-int': '/2018.png',
+};
+
+function resolveEditionTheme(slug: string | undefined, coverImageUrl?: string | null): CSSProperties {
+  const t = (slug && EDITION_THEMES[slug]) || DEFAULT_THEME;
+  const cover =
+    (slug ? COVER_OVERRIDE_BY_SLUG[slug] : undefined) ||
+    (typeof coverImageUrl === 'string' && coverImageUrl.trim().length > 0
+      ? coverImageUrl
+      : undefined);
+  return {
+    '--theme-accent': t.accent,
+    '--theme-accent-dim': t.accentDim,
+    '--theme-gold': t.gold,
+    '--theme-surface': t.surface,
+    '--theme-surface-hover': t.surfaceHover,
+    '--theme-visual-start': t.visualStart,
+    '--theme-visual-end': t.visualEnd,
+    '--theme-hero-start': t.heroStart,
+    '--theme-hero-end': t.heroEnd,
+    '--theme-hero-image': cover ? `url("${assetUrl(cover)}")` : 'none',
+  } as CSSProperties;
+}
+
+function StickerVisual({
+  imageUrl,
+  albumLabel,
+}: {
+  imageUrl: string | null;
+  albumLabel: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const showImg = Boolean(imageUrl && !failed);
+  return (
+    <div className="sticker-visual">
+      {showImg ? (
+        <img src={imageUrl!} alt="" loading="lazy" onError={() => setFailed(true)} />
+      ) : (
+        <span className="sticker-placeholder-label">{albumLabel}</span>
+      )}
+    </div>
+  );
+}
+
+export default function EditionPage() {
+  const { slug } = useParams<{ slug: string }>();
+  const [edition, setEdition] = useState<Edition | null>(null);
+  const [pages, setPages] = useState<AlbumPageRow[]>([]);
+  const [stickers, setStickers] = useState<StickerSlot[]>([]);
+  const [totalApi, setTotalApi] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+
+    Promise.all([fetchEdition(slug), fetchEditionPages(slug), fetchAllStickers(slug)])
+      .then(([ed, pageRows, { stickers: st, total }]) => {
+        if (cancelled) return;
+        setEdition(ed);
+        setPages(pageRows);
+        setStickers(st);
+        setTotalApi(total);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  const categories = useMemo(() => {
+    const set = new Set(stickers.map((s) => s.category));
+    return Array.from(set).sort();
+  }, [stickers]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return stickers.filter((s) => {
+      if (category && s.category !== category) return false;
+      if (!q) return true;
+      return (
+        s.album_label.toLowerCase().includes(q) ||
+        s.display_name.toLowerCase().includes(q) ||
+        (s.team_name?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [stickers, query, category]);
+
+  const stickersByPage = useMemo(() => {
+    const pageTitleByNumber = new Map(
+      pages
+        .filter((page) => page.page_number != null)
+        .map((page) => [page.page_number, page.title?.trim() || null] as const)
+    );
+    const grouped = new Map<
+      string,
+      { key: string; pageNumber: number | null; title: string | null; stickers: StickerSlot[] }
+    >();
+
+    for (const sticker of filtered) {
+      const pageNumber = sticker.page_number ?? null;
+      const key = pageNumber == null ? 'without-page' : String(pageNumber);
+      const existing = grouped.get(key);
+
+      if (existing) {
+        existing.stickers.push(sticker);
+        continue;
+      }
+
+      grouped.set(key, {
+        key,
+        pageNumber,
+        title: pageNumber == null ? null : pageTitleByNumber.get(pageNumber) ?? null,
+        stickers: [sticker],
+      });
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => {
+      if (a.pageNumber == null) return 1;
+      if (b.pageNumber == null) return -1;
+      return a.pageNumber - b.pageNumber;
+    });
+  }, [filtered, pages]);
+
+  async function patchSticker(stickerId: string, patch: { owned?: boolean }) {
+    if (!slug) return;
+    setSaveErr(null);
+    try {
+      const updated = await updateStickerCollection(slug, stickerId, patch);
+      setStickers((prev) =>
+        prev.map((s) =>
+          s.id === stickerId
+            ? { ...s, owned: updated.owned, duplicate_count: updated.duplicate_count }
+            : s
+        )
+      );
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : 'Falha ao salvar coleção');
+    }
+  }
+
+  function handleOwnedChange(stickerId: string, owned: boolean) {
+    setStickers((prev) => prev.map((s) => (s.id === stickerId ? { ...s, owned } : s)));
+    void patchSticker(stickerId, { owned });
+  }
+
+  function toggleOwned(sticker: StickerSlot) {
+    handleOwnedChange(sticker.id, !sticker.owned);
+  }
+
+  if (!slug) {
+    return <p className="error-box">Slug inválido.</p>;
+  }
+
+  if (loading) {
+    return <p className="loading">Carregando álbum…</p>;
+  }
+
+  if (err || !edition) {
+    return (
+      <div>
+        <div className="back-row">
+          <Link to="/">← Voltar</Link>
+        </div>
+        <div className="error-box">{err ?? 'Edição não encontrada.'}</div>
+      </div>
+    );
+  }
+
+  const themeVars = resolveEditionTheme(edition.slug, edition.cover_image_url);
+
+  return (
+    <div className="edition-themed" style={themeVars}>
+      <section className="edition-hero">
+        <div className="edition-hero-inner">
+          <h1 className="page-title">{edition.name}</h1>
+          <p className="page-sub">
+            {edition.year}
+            {edition.host_country ? ` · ${edition.host_country}` : ''} · {edition.publisher}
+            {' · '}
+            <strong>{totalApi}</strong> posições no checklist
+            {edition.sticker_total > 0 && edition.sticker_total !== totalApi ? (
+              <span style={{ color: 'var(--muted)' }}>
+                {' '}
+                (total cadastrado na edição: {edition.sticker_total})
+              </span>
+            ) : null}
+          </p>
+        </div>
+      </section>
+
+      <div className="back-row">
+        <Link to="/">← Todas as edições</Link>
+      </div>
+
+      <div className="toolbar">
+        <input
+          className="search"
+          type="search"
+          placeholder="Buscar por código, nome ou seleção…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Buscar figurinha"
+        />
+        <span className="stats">
+          Mostrando <strong>{filtered.length}</strong> de {stickers.length}
+        </span>
+      </div>
+      {saveErr ? <p className="error-box">{saveErr}</p> : null}
+
+      <div className="chips" role="group" aria-label="Filtrar por categoria">
+        <button
+          type="button"
+          className={`chip ${category === null ? 'chip-active' : ''}`}
+          onClick={() => setCategory(null)}
+        >
+          Todas
+        </button>
+        {categories.map((c) => (
+          <button
+            key={c}
+            type="button"
+            className={`chip ${category === c ? 'chip-active' : ''}`}
+            onClick={() => setCategory(c)}
+          >
+            {categoryLabel(c)}
+          </button>
+        ))}
+      </div>
+
+      <div className="sticker-page-sections">
+        {stickersByPage.map((section) => (
+          <section key={section.key} className="sticker-page-section">
+            <header className="sticker-page-header">
+              <div>
+                <h2>{section.title || 'Outros'}</h2>
+              </div>
+              <span>{section.stickers.length} figurinhas</span>
+            </header>
+
+            <div className="grid-stickers">
+              {section.stickers.map((s) => (
+                <article
+                  key={s.id}
+                  className={`sticker ${s.is_special ? 'sticker-special' : ''} ${s.owned ? 'sticker-owned' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={s.owned}
+                  aria-label={`${s.owned ? 'Marcar como faltando' : 'Marcar como tenho'}: ${s.album_label} ${s.display_name}`}
+                  onClick={() => toggleOwned(s)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      toggleOwned(s);
+                    }
+                  }}
+                >
+                  <StickerVisual imageUrl={s.image_url} albumLabel={s.album_label} />
+                  <div className="sticker-body">
+                    <div className="sticker-title-row">
+                      <div className="sticker-label">{s.album_label}</div>
+                      {s.owned ? <span className="sticker-owned-badge">Tenho</span> : null}
+                    </div>
+                    <div className="sticker-name">{s.display_name}</div>
+                    <div className="sticker-meta">
+                      {categoryLabel(s.category)}
+                      {s.team_name ? ` · ${s.team_name}` : ''}
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="page-sub" style={{ marginTop: '1.5rem' }}>
+          Nenhuma figurinha com os filtros atuais.
+        </p>
+      ) : null}
+    </div>
+  );
+}

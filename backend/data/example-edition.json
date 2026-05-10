@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "description": "albumLabel = código oficial no verso (ex.: 00, 36x). sortIndex = ordem no checklist."
+  },
+  "edition": {
+    "slug": "fwc-2014",
+    "name": "Copa do Mundo FIFA Brasil 2014",
+    "year": 2014,
+    "hostCountry": "Brasil",
+    "publisher": "Panini",
+    "coverImageUrl": "/static/covers/fwc-2014.jpg",
+    "status": "published",
+    "estimatedPackPriceCents": 800,
+    "collectorNotes": {
+      "stickersPerPack": 5,
+      "notes": "Exemplo de payload — preencher totais e páginas reais ao importar dados oficiais."
+    }
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "title": "Abertura",
+      "previewImageUrl": "/static/pages/fwc-2014/page-001.jpg"
+    },
+    {
+      "pageNumber": 2,
+      "title": "Brasil",
+      "previewImageUrl": "/static/pages/fwc-2014/page-002.jpg"
+    }
+  ],
+  "stickers": [
+    {
+      "albumLabel": "1",
+      "sortIndex": 1,
+      "pageNumber": 1,
+      "indexOnPage": 1,
+      "category": "intro",
+      "isSpecial": true,
+      "displayName": "Logo Oficial (exemplo)",
+      "imageUrl": "/static/stickers/fwc-2014/001.png",
+      "metadata": { "officialChecklistRow": 1 }
+    },
+    {
+      "albumLabel": "2",
+      "sortIndex": 2,
+      "pageNumber": 1,
+      "indexOnPage": 2,
+      "category": "trophy",
+      "isSpecial": true,
+      "displayName": "Troféu (exemplo)",
+      "imageUrl": "/static/stickers/fwc-2014/002.png",
+      "metadata": {}
+    },
+    {
+      "albumLabel": "3",
+      "sortIndex": 3,
+      "pageNumber": 2,
+      "indexOnPage": 1,
+      "category": "player",
+      "isSpecial": false,
+      "displayName": "Jogador exemplo",
+      "teamCode": "BRA",
+      "teamName": "Brasil",
+      "shirtNumber": 10,
+      "position": "Meia",
+      "imageUrl": "/static/stickers/fwc-2014/003.png",
+      "metadata": {}
+    }
+  ]
+}

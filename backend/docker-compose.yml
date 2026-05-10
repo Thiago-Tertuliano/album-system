@@ -1,0 +1,24 @@
+services:
+  postgres:
+    # Evita "exec format error" no entrypoint quando host/arquitetura da imagem não casam
+    # (ex.: Windows ARM, manifest multi-arch). Em Linux ARM nativo, use linux/arm64.
+    platform: linux/amd64
+    image: postgres:16-alpine
+    container_name: album-postgres
+    environment:
+      POSTGRES_USER: album
+      POSTGRES_PASSWORD: album
+      POSTGRES_DB: album
+    ports:
+      - '5433:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U album -d album']
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - album_pg_data:/var/lib/postgresql/data
+
+volumes:
+  album_pg_data:
