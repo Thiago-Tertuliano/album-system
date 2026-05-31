@@ -122,6 +122,48 @@ export const adminUsers = pgTable(
   })
 );
 
+/** Colecionador — conta para sync web/mobile. */
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: text('email').notNull().unique(),
+    passwordHash: text('password_hash').notNull(),
+    displayName: text('display_name'),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    emailIdx: index('users_email_idx').on(t.email),
+  })
+);
+
+/** Progresso por usuário e slot (fonte da verdade para coleção). */
+export const userStickerProgress = pgTable(
+  'user_sticker_progress',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    stickerSlotId: uuid('sticker_slot_id')
+      .notNull()
+      .references(() => stickerSlots.id, { onDelete: 'cascade' }),
+    owned: boolean('owned').notNull().default(false),
+    duplicateCount: integer('duplicate_count').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqUserSlot: uniqueIndex('user_sticker_progress_user_slot_unique').on(
+      t.userId,
+      t.stickerSlotId
+    ),
+    userIdx: index('user_sticker_progress_user_id_idx').on(t.userId),
+    slotIdx: index('user_sticker_progress_slot_id_idx').on(t.stickerSlotId),
+  })
+);
+
 export const editionsRelations = relations(editions, ({ many }) => ({
   pages: many(albumPages),
   stickers: many(stickerSlots),
@@ -135,7 +177,7 @@ export const albumPagesRelations = relations(albumPages, ({ one, many }) => ({
   stickers: many(stickerSlots),
 }));
 
-export const stickerSlotsRelations = relations(stickerSlots, ({ one }) => ({
+export const stickerSlotsRelations = relations(stickerSlots, ({ one, many }) => ({
   edition: one(editions, {
     fields: [stickerSlots.editionId],
     references: [editions.id],
@@ -143,5 +185,21 @@ export const stickerSlotsRelations = relations(stickerSlots, ({ one }) => ({
   page: one(albumPages, {
     fields: [stickerSlots.pageId],
     references: [albumPages.id],
+  }),
+  progress: many(userStickerProgress),
+}));
+
+export const usersRelations = relations(users, ({ many }) => ({
+  progress: many(userStickerProgress),
+}));
+
+export const userStickerProgressRelations = relations(userStickerProgress, ({ one }) => ({
+  user: one(users, {
+    fields: [userStickerProgress.userId],
+    references: [users.id],
+  }),
+  stickerSlot: one(stickerSlots, {
+    fields: [userStickerProgress.stickerSlotId],
+    references: [stickerSlots.id],
   }),
 }));

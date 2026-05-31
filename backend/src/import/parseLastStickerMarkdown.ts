@@ -87,8 +87,14 @@ function classify(sectionNorm: string, titleNorm: string, stickerType: string) {
   }
 
   const tl = titleNorm.toLowerCase();
-  if (tl === 'emblem' || tl.includes('logo oficial')) {
+  if (tl === 'emblem' || tl === 'escudo' || tl.includes('logo oficial')) {
     category = 'logo';
+  }
+  if (tl.includes('mascote')) {
+    category = 'mascot';
+  }
+  if (tl.includes('troféu') || tl.includes('trofeu')) {
+    category = 'trophy';
   }
   if (tl === 'team photo') {
     category = 'team_photo';
@@ -182,6 +188,42 @@ function tableRows(md: string): string[] {
   return rows;
 }
 
+function compactRows(md: string): ParsedSticker[] {
+  const normalized = md.replace(/\s+/g, ' ').trim();
+  const rows: ParsedSticker[] = [];
+  let sortIndex = 0;
+  const entryRe =
+    /([A-Za-z]{1,4}\d{1,4}|\d{1,4})\[([^\]]+)\]\((https?:\/\/[^)]+)\)(.*?)-\d+(?:\.\d+)?(?=\s+(?:[A-Za-z]{1,4}\d{1,4}|\d{1,4})\[|$)/g;
+
+  for (const match of normalized.matchAll(entryRe)) {
+    const label = normalizeCell(match[1] ?? '');
+    if (!LABEL_RE.test(label)) continue;
+
+    const displayName = normalizeCell(match[2] ?? '');
+    const sourceUrl = normalizeCell(match[3] ?? '');
+    const section = normalizeSection(match[4] ?? '');
+    if (!displayName || !section) continue;
+
+    sortIndex += 1;
+    const stickerType = displayName.toLowerCase().includes('desafio') ? 'update' : '-';
+    const { category, isSpecial, teamName } = classify(section, displayName, stickerType);
+
+    rows.push({
+      albumLabel: label,
+      sortIndex,
+      displayName,
+      section,
+      stickerType,
+      sourceUrl,
+      category,
+      isSpecial,
+      teamName,
+    });
+  }
+
+  return rows;
+}
+
 /** Interpreta checklist completa a partir do texto Markdown da página LastSticker. */
 export function parseLastStickerMarkdown(md: string): ParsedSticker[] {
   const out: ParsedSticker[] = [];
@@ -200,5 +242,5 @@ export function parseLastStickerMarkdown(md: string): ParsedSticker[] {
     out.push(parsed);
   }
 
-  return out;
+  return out.length > 0 ? out : compactRows(md);
 }

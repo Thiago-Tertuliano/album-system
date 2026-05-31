@@ -95,12 +95,26 @@ O parser gera **uma página (`album_pages`) por seção** na ordem em que aparec
 |--------|---------|-----------|
 | GET | `/health` | Saúde |
 | POST | `/v1/auth/login` | Login administrativo |
+| POST | `/v1/auth/register` | Cadastro colecionador |
+| POST | `/v1/auth/collector/login` | Login colecionador |
 | GET | `/v1/editions` | Edições `published` |
 | GET | `/v1/editions/:slugOuId` | Detalhe |
-| GET | `/v1/editions/:slugOuId/stickers?page=&limit=` | Figurinhas ordenadas por `sort_index` |
+| GET | `/v1/editions/:slugOuId/stickers?page=&limit=` | Figurinhas (`owned` com token colecionador) |
+| PATCH | `/v1/me/editions/:slug/progress` | Atualizar coleção (auth colecionador) |
+| GET | `/v1/me/editions/:slug/summary` | Resumo % tenho/faltam |
 | GET | `/v1/editions/:slugOuId/pages` | Páginas do álbum |
 
-Rotas em `/v1/admin/*` exigem `Authorization: Bearer <token>` emitido pelo login.
+Rotas em `/v1/admin/*` exigem token **admin**. Progresso do colecionador exige token **collector** (`role` no JWT).
+
+Scripts úteis:
+
+```bash
+npm run collector:create -- --email user@test.com --password "senha12345"
+npm run db:migrate-legacy-progress   # copia owned legado de sticker_slots
+npm run db:set-covers                # capas MVP em /static/covers/
+```
+
+Mobile/APK: [`../frontend/web/MOBILE.md`](../frontend/web/MOBILE.md).
 
 No admin web, a importação de uma nova edição pode iniciar automaticamente o job
 `cache-sticker-images` para aquela edição. O mesmo job também pode ser disparado
@@ -116,9 +130,9 @@ Ver [`data/example-edition.json`](data/example-edition.json).
 
 ## Próximos passos sugeridos
 
-- `users` + `user_sticker_progress`.
-- `GET /v1/me/editions/:id/missing` + PDF.
-- CDN/`/static` para imagens; opcional Playwright para gerar snapshots periodicamente (fora do escopo atual).
+- `GET /v1/me/editions/:id/missing` + export/PDF.
+- Offline sync no mobile.
+- CDN dedicado para imagens em escala.
 
 ## Documentação Axellion
 

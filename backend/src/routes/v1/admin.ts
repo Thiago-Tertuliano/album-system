@@ -136,6 +136,8 @@ function isStandardAlbumLabel(albumLabel: string): boolean {
   return (
     /^\d{1,4}$/.test(label) ||
     /^00$/i.test(label) ||
+    /^E\d{1,4}$/i.test(label) ||
+    /^CB\d{1,4}$/i.test(label) ||
     /^FWC\d{1,3}$/i.test(label) ||
     /^[A-Z]{3}\d{1,2}$/i.test(label)
   );
@@ -218,6 +220,19 @@ export const adminRoutes = (db: Db, opts: AdminRoutesOpts): FastifyPluginAsync =
       }
 
       const input = parsed.data;
+      const [existing] = await db.select({ id: editions.id }).from(editions).where(eq(editions.slug, input.slug)).limit(1);
+      if (existing) {
+        return reply.code(409).send({
+          error: {
+            code: 'CONFLICT',
+            message: 'Ja existe uma edicao com este slug. Altere o slug ou edite a edicao existente.',
+            fields: {
+              slug: ['Slug ja cadastrado.'],
+            },
+          },
+        });
+      }
+
       const [row] = await db
         .insert(editions)
         .values({
@@ -278,7 +293,13 @@ export const adminRoutes = (db: Db, opts: AdminRoutesOpts): FastifyPluginAsync =
     app.post<{ Params: { id: string }; Body: unknown }>('/editions/:id/import/laststicker-md', async (req, reply) => {
       const parsed = importSchema.safeParse(req.body);
       if (!parsed.success) {
-        return reply.code(400).send({ error: { code: 'BAD_REQUEST', message: 'Snapshot Markdown invalido.' } });
+        return reply.code(400).send({
+          error: {
+            code: 'BAD_REQUEST',
+            message: 'Snapshot Markdown invalido. Cole o checklist em Markdown copiado do LastSticker.',
+            fields: parsed.error.flatten().fieldErrors,
+          },
+        });
       }
 
       const [current] = await db.select(editionSelect).from(editions).where(editionSlugOrIdWhere(req.params.id)).limit(1);
@@ -292,7 +313,21 @@ export const adminRoutes = (db: Db, opts: AdminRoutesOpts): FastifyPluginAsync =
         : parsedStickers.filter(isStandardAlbumSticker);
       const { items: stickers, duplicatesSkipped } = dedupeAndReindexStickers(filteredStickers);
       if (stickers.length === 0) {
-        return reply.code(400).send({ error: { code: 'BAD_REQUEST', message: 'Nenhuma figurinha parseada.' } });
+        const message =
+          parsedStickers.length > 0
+            ? 'O checklist foi lido, mas nenhuma figurinha padrao sobrou depois do filtro. Verifique se os codigos seguem o padrao do album ou marque "Incluir extras/update sets".'
+            : 'Nenhuma figurinha foi encontrada no Markdown. Copie a tabela/checklist em Markdown do LastSticker.';
+        return reply.code(400).send({
+          error: {
+            code: 'BAD_REQUEST',
+            message,
+            details: {
+              total_parsed: parsedStickers.length,
+              total_filtered: parsedStickers.length - filteredStickers.length,
+              include_extra_sets: parsed.data.include_extra_sets,
+            },
+          },
+        });
       }
 
       const sampleUrl = stickers.find((s) => s.sourceUrl?.includes('laststicker.com/cards/'))?.sourceUrl;

@@ -63,13 +63,13 @@ Unidade atômica — **um slot = uma figurinha** na UX.
 | image_url | string opcional | Arte da figurinha |
 | metadata | JSON opcional | `source_url`, `sticker_type`, `laststicker_section`, etc. |
 
-### `user` (planejado)
+### `users` (colecionador)
 
-Campos mínimos conforme estratégia de auth — **ainda não criado no MVP de catálogo**.
+Conta para sincronizar progresso entre web e app mobile. Separado de `admin_users`.
 
-### `user_sticker_progress` (planejado)
+### `user_sticker_progress`
 
-Estado por usuário e slot — base para **PDF de faltantes** e sincronização web/mobile.
+Estado por usuário e slot — fonte da verdade para **owned** / **duplicate_count** (API `/v1/me/...`).
 
 | Campo | Tipo | Notas |
 |-------|------|--------|

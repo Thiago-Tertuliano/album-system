@@ -1,25 +1,17 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { SQL } from 'drizzle-orm';
-import { eq, asc, and, or, sql } from 'drizzle-orm';
-import { editions, stickerSlots, albumPages } from '../../db/schema.js';
+import { eq, asc, and, sql } from 'drizzle-orm';
+import { editions, stickerSlots, albumPages, userStickerProgress } from '../../db/schema.js';
 import type { Db } from '../../db/client.js';
 import { resolveStickerImageUrl } from '../../util/stickerImageUrl.js';
 import { inferLastStickerCardsNumericId } from '../../lib/lastStickerCardImages.js';
+import { editionSlugOrIdWhere } from '../../lib/editionLookup.js';
+import { getCollectorFromRequest } from '../../auth/requireCollector.js';
+import { requireCollector } from '../../auth/requireCollector.js';
+import { upsertProgress } from './me.js';
 
 function previewSourceUrl(meta: Record<string, unknown> | null): string | null {
   const u = meta?.source_url;
   return typeof u === 'string' && /^https?:\/\//i.test(u) ? u : null;
-}
-
-/** Evita comparar slug textual à coluna uuid (`22P02` no Postgres). */
-function editionSlugOrIdWhere(idOrSlug: string): SQL {
-  const trimmed = idOrSlug.trim();
-  const uuidLike =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
-  if (uuidLike) {
-    return or(eq(editions.slug, trimmed), eq(editions.id, trimmed))!;
-  }
-  return eq(editions.slug, trimmed);
 }
 
 const editionSelect = {
@@ -39,11 +31,12 @@ const editionSelect = {
 export type EditionsRoutesOpts = {
   stickerImageUrlTemplate?: string;
   stickerImageProxyTemplate?: string;
+  jwtSecret: string;
 };
 
-export const editionsRoutes = (db: Db, opts?: EditionsRoutesOpts): FastifyPluginAsync => {
-  const tpl = opts?.stickerImageUrlTemplate;
-  const proxyTpl = opts?.stickerImageProxyTemplate;
+export const editionsRoutes = (db: Db, opts: EditionsRoutesOpts): FastifyPluginAsync => {
+  const tpl = opts.stickerImageUrlTemplate;
+  const proxyTpl = opts.stickerImageProxyTemplate;
 
   return async (app) => {
     app.get('/editions', async (_req, reply) => {
@@ -75,6 +68,8 @@ export const editionsRoutes = (db: Db, opts?: EditionsRoutesOpts): FastifyPlugin
       '/editions/:id/stickers',
       async (req, reply) => {
         const idOrSlug = req.params.id;
+        const collector = getCollectorFromRequest(req, opts.jwtSecret);
+
         const editionRows = await db
           .select({
             id: editions.id,
@@ -119,8 +114,6 @@ export const editionsRoutes = (db: Db, opts?: EditionsRoutesOpts): FastifyPlugin
             shirt_number: stickerSlots.shirtNumber,
             position: stickerSlots.position,
             image_url: stickerSlots.imageUrl,
-            owned: stickerSlots.owned,
-            duplicate_count: stickerSlots.duplicateCount,
             metadata: stickerSlots.metadata,
             page_number: albumPages.pageNumber,
           })
@@ -130,6 +123,30 @@ export const editionsRoutes = (db: Db, opts?: EditionsRoutesOpts): FastifyPlugin
           .orderBy(asc(stickerSlots.sortIndex))
           .limit(limit)
           .offset(offset);
+
+        const progressBySlot = new Map<string, { owned: boolean; duplicate_count: number }>();
+        if (collector) {
+          const progressRows = await db
+            .select({
+              slot_id: userStickerProgress.stickerSlotId,
+              owned: userStickerProgress.owned,
+              duplicate_count: userStickerProgress.duplicateCount,
+            })
+            .from(userStickerProgress)
+            .innerJoin(stickerSlots, eq(userStickerProgress.stickerSlotId, stickerSlots.id))
+            .where(
+              and(
+                eq(userStickerProgress.userId, collector.sub),
+                eq(stickerSlots.editionId, editionId)
+              )
+            );
+          for (const p of progressRows) {
+            progressBySlot.set(p.slot_id, {
+              owned: p.owned,
+              duplicate_count: p.duplicate_count,
+            });
+          }
+        }
 
         let lastStickerNid = inferLastStickerCardsNumericId(
           collectorNotes,
@@ -152,7 +169,19 @@ export const editionsRoutes = (db: Db, opts?: EditionsRoutesOpts): FastifyPlugin
         const items = stickers.map((row) => {
           const meta = row.metadata as Record<string, unknown> | null;
           return {
-            ...row,
+            id: row.id,
+            edition_id: row.edition_id,
+            page_id: row.page_id,
+            album_label: row.album_label,
+            sort_index: row.sort_index,
+            index_on_page: row.index_on_page,
+            category: row.category,
+            is_special: row.is_special,
+            display_name: row.display_name,
+            team_code: row.team_code,
+            team_name: row.team_name,
+            shirt_number: row.shirt_number,
+            position: row.position,
             image_url: resolveStickerImageUrl({
               storedUrl: row.image_url,
               albumLabel: row.album_label,
@@ -161,6 +190,10 @@ export const editionsRoutes = (db: Db, opts?: EditionsRoutesOpts): FastifyPlugin
               lastStickerCardsNumericId: lastStickerNid,
               imageProxyTemplate: proxyTpl,
             }),
+            owned: progressBySlot.get(row.id)?.owned ?? false,
+            duplicate_count: progressBySlot.get(row.id)?.duplicate_count ?? 0,
+            metadata: row.metadata,
+            page_number: row.page_number,
             preview_source_url: previewSourceUrl(meta),
           };
         });
@@ -175,10 +208,14 @@ export const editionsRoutes = (db: Db, opts?: EditionsRoutesOpts): FastifyPlugin
       }
     );
 
+    /** @deprecated Use PATCH /v1/me/editions/:id/progress com token de colecionador. */
     app.patch<{
       Params: { id: string; stickerId: string };
       Body: { owned?: unknown; duplicate_count?: unknown };
     }>('/editions/:id/stickers/:stickerId/collection', async (req, reply) => {
+      const collector = await requireCollector(req, reply, opts.jwtSecret);
+      if (!collector) return;
+
       const idOrSlug = req.params.id;
       const { stickerId } = req.params;
 
@@ -193,11 +230,7 @@ export const editionsRoutes = (db: Db, opts?: EditionsRoutesOpts): FastifyPlugin
       }
       const editionId = editionRows[0].id;
 
-      const patch: {
-        owned?: boolean;
-        duplicateCount?: number;
-        updatedAt: SQL;
-      } = { updatedAt: sql`now()` };
+      const patch: { owned?: boolean; duplicate_count?: number } = {};
 
       if (req.body.owned !== undefined) {
         if (typeof req.body.owned !== 'boolean') {
@@ -221,36 +254,35 @@ export const editionsRoutes = (db: Db, opts?: EditionsRoutesOpts): FastifyPlugin
             },
           });
         }
-        patch.duplicateCount = req.body.duplicate_count;
+        patch.duplicate_count = req.body.duplicate_count;
       }
 
-      if (Object.keys(patch).length === 1) {
+      if (patch.owned === undefined && patch.duplicate_count === undefined) {
         return reply.code(400).send({
           error: {
             code: 'BAD_REQUEST',
-            message: 'Informe ao menos um campo para atualizar (`owned` ou `duplicate_count`).',
+            message: 'Informe ao menos um campo (`owned` ou `duplicate_count`).',
           },
         });
       }
 
-      const updated = await db
-        .update(stickerSlots)
-        .set(patch)
-        .where(and(eq(stickerSlots.id, stickerId), eq(stickerSlots.editionId, editionId)))
-        .returning({
-          id: stickerSlots.id,
-          owned: stickerSlots.owned,
-          duplicate_count: stickerSlots.duplicateCount,
-        });
+      const applied = await upsertProgress(db, collector.sub, editionId, [
+        { slot_id: stickerId, ...patch },
+      ]);
 
-      if (!updated.length) {
+      if (!applied.length) {
         return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Figurinha não encontrada' } });
       }
 
-      return reply.send(updated[0]);
+      return reply.send({
+        id: stickerId,
+        owned: applied[0].owned,
+        duplicate_count: applied[0].duplicate_count,
+        deprecated: true,
+        use_instead: `/v1/me/editions/${idOrSlug}/progress`,
+      });
     });
 
-    /** Páginas do álbum com preview — navegação “folha inteira”. */
     app.get<{ Params: { id: string } }>('/editions/:id/pages', async (req, reply) => {
       const idOrSlug = req.params.id;
       const editionRows = await db

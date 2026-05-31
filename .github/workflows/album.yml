@@ -1,0 +1,35 @@
+name: Album CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/web/package-lock.json
+
+      - name: Backend install and build
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Frontend web install and build
+        working-directory: frontend/web
+        env:
+          VITE_APP_MODE: collector
+        run: |
+          npm ci
+          npm run build

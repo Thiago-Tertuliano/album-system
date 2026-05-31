@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Album</string>
+    <string name="title_activity_main">Album</string>
+    <string name="package_name">com.axellion.album</string>
+    <string name="custom_url_scheme">com.axellion.album</string>
+</resources>

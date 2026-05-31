@@ -1,3 +1,5 @@
+import { clearCollectorToken, getCollectorToken } from './auth/collectorToken';
+
 /** Monta URL da API: dev usa proxy `/v1`; produção pode usar URL absoluta. */
 export function apiUrl(path: string): string {
   const trimmed = path.startsWith('/') ? path : `/${path}`;
@@ -86,6 +88,20 @@ export type CoverAsset = {
   path: string;
 };
 
+export type EditionSummary = {
+  edition_id: string;
+  total: number;
+  owned: number;
+  missing: number;
+  percent: number;
+};
+
+export type CollectorSession = {
+  token: string;
+  expires_in: number;
+  user: { id: string; email: string; display_name: string | null };
+};
+
 export const ADMIN_TOKEN_KEY = 'album_admin_token';
 
 export function getAdminToken(): string | null {
@@ -130,6 +146,50 @@ async function readApiError(res: Response, fallback: string): Promise<Error> {
   }
 }
 
+async function collectorFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = getCollectorToken();
+  const headers = new Headers(init.headers);
+  if (!headers.has('content-type') && init.body) headers.set('content-type', 'application/json');
+  if (token) headers.set('authorization', `Bearer ${token}`);
+
+  const res = await fetch(apiUrl(path), { ...init, headers });
+  if (res.status === 401) {
+    clearCollectorToken();
+    throw new Error('Sessão expirada. Faça login novamente.');
+  }
+  return res;
+}
+
+export async function collectorRegister(
+  email: string,
+  password: string,
+  displayName?: string
+): Promise<CollectorSession> {
+  const res = await fetch(apiUrl('/v1/auth/register'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password, display_name: displayName }),
+  });
+  if (!res.ok) throw new Error(`Falha no cadastro (${res.status})`);
+  return res.json() as Promise<CollectorSession>;
+}
+
+export async function collectorLogin(email: string, password: string): Promise<CollectorSession> {
+  const res = await fetch(apiUrl('/v1/auth/collector/login'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error(`Email ou senha inválidos (${res.status})`);
+  return res.json() as Promise<CollectorSession>;
+}
+
+export async function fetchEditionSummary(slugOrId: string): Promise<EditionSummary> {
+  const res = await collectorFetch(`/v1/me/editions/${encodeURIComponent(slugOrId)}/summary`);
+  if (!res.ok) throw new Error(`Falha ao carregar progresso (${res.status})`);
+  return res.json() as Promise<EditionSummary>;
+}
+
 export async function fetchEditions(): Promise<Edition[]> {
   const res = await fetch(apiUrl('/v1/editions'));
   if (!res.ok) throw new Error(`Falha ao listar edições (${res.status})`);
@@ -160,8 +220,8 @@ export async function fetchAllStickers(slugOrId: string): Promise<{ stickers: St
 
   for (;;) {
     const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
-    const res = await fetch(
-      apiUrl(`/v1/editions/${encodeURIComponent(slugOrId)}/stickers?${qs}`)
+    const res = await collectorFetch(
+      `/v1/editions/${encodeURIComponent(slugOrId)}/stickers?${qs}`
     );
     if (!res.ok) throw new Error(`Falha ao carregar figurinhas (${res.status})`);
     const data = (await res.json()) as {
@@ -183,16 +243,20 @@ export async function updateStickerCollection(
   stickerId: string,
   patch: { owned?: boolean; duplicate_count?: number }
 ): Promise<Pick<StickerSlot, 'id' | 'owned' | 'duplicate_count'>> {
-  const res = await fetch(
-    apiUrl(`/v1/editions/${encodeURIComponent(slugOrId)}/stickers/${encodeURIComponent(stickerId)}/collection`),
+  const res = await collectorFetch(
+    `/v1/me/editions/${encodeURIComponent(slugOrId)}/progress`,
     {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(patch),
+      body: JSON.stringify({ slot_id: stickerId, ...patch }),
     }
   );
   if (!res.ok) throw new Error(`Falha ao atualizar coleção (${res.status})`);
-  return res.json() as Promise<Pick<StickerSlot, 'id' | 'owned' | 'duplicate_count'>>;
+  const data = (await res.json()) as {
+    applied: { slot_id: string; owned: boolean; duplicate_count: number }[];
+  };
+  const row = data.applied[0];
+  if (!row) throw new Error('Figurinha não encontrada');
+  return { id: row.slot_id, owned: row.owned, duplicate_count: row.duplicate_count };
 }
 
 export async function adminLogin(email: string, password: string): Promise<void> {
@@ -265,7 +329,7 @@ export async function importAdminLastStickerMarkdown(
       include_extra_sets: options.includeExtraSets ?? false,
     }),
   });
-  if (!res.ok) throw new Error(`Falha ao importar checklist (${res.status})`);
+  if (!res.ok) throw await readApiError(res, `Falha ao importar checklist (${res.status})`);
   return res.json() as Promise<ImportResult>;
 }
 

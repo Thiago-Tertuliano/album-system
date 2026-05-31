@@ -6,7 +6,9 @@ import { loadEnv } from './env.js';
 import { createDb } from './db/client.js';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/v1/auth.js';
+import { collectorAuthRoutes } from './routes/v1/collectorAuth.js';
 import { editionsRoutes } from './routes/v1/editions.js';
+import { meRoutes } from './routes/v1/me.js';
 import { adminRoutes } from './routes/v1/admin.js';
 
 function stickerImageProxyTemplate(raw: string | undefined): string | undefined {
@@ -28,17 +30,19 @@ async function main() {
   });
 
   await app.register(healthRoutes);
-  await app.register(
-    authRoutes(db, {
-      jwtSecret: env.JWT_SECRET,
-      jwtExpiresInSeconds: env.JWT_EXPIRES_IN_SECONDS,
-    }),
-    { prefix: '/v1' }
-  );
+  const jwtOpts = {
+    jwtSecret: env.JWT_SECRET,
+    jwtExpiresInSeconds: env.JWT_EXPIRES_IN_SECONDS,
+  };
+
+  await app.register(authRoutes(db, jwtOpts), { prefix: '/v1' });
+  await app.register(collectorAuthRoutes(db, jwtOpts), { prefix: '/v1' });
+  await app.register(meRoutes(db, { jwtSecret: env.JWT_SECRET }), { prefix: '/v1' });
   await app.register(
     editionsRoutes(db, {
       stickerImageUrlTemplate: env.STICKER_IMAGE_URL_TEMPLATE,
       stickerImageProxyTemplate: stickerImageProxyTemplate(env.STICKER_IMAGE_PROXY_TEMPLATE),
+      jwtSecret: env.JWT_SECRET,
     }),
     { prefix: '/v1' }
   );

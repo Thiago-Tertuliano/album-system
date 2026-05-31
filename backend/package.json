@@ -12,6 +12,9 @@
     "db:seed": "tsx src/seed/seed.ts",
     "db:studio": "drizzle-kit studio",
     "admin:create": "tsx src/auth/createAdmin.ts",
+    "collector:create": "tsx src/auth/createCollector.ts",
+    "db:migrate-legacy-progress": "tsx src/db/migrateLegacyProgress.ts",
+    "db:set-covers": "tsx src/scripts/setEditionCovers.ts",
     "import:laststicker-md": "tsx src/import/cli.ts laststicker-md",
     "job:cache-sticker-images": "tsx src/jobs/cacheStickerImages.ts"
   },

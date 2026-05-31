@@ -89,6 +89,8 @@ function isStandardAlbumLabel(albumLabel: string): boolean {
   return (
     /^\d{1,4}$/.test(label) ||
     /^00$/i.test(label) ||
+    /^E\d{1,4}$/i.test(label) ||
+    /^CB\d{1,4}$/i.test(label) ||
     /^FWC\d{1,3}$/i.test(label) ||
     /^[A-Z]{3}\d{1,2}$/i.test(label)
   );

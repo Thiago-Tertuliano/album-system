@@ -22,8 +22,8 @@ const CARD_THEME_BY_SLUG: Record<string, CardTheme> = {
 };
 
 const COVER_OVERRIDE_BY_SLUG: Record<string, string> = {
-  'fwc-2014': '/2014.jpg',
-  'fwc-2018-int': '/2018.png',
+  'fwc-2014': '/static/covers/fwc-2014.jpg',
+  'fwc-2018-int': '/static/covers/fwc-2018-int.png',
 };
 
 function cardStyleForEdition(e: Edition): CSSProperties {

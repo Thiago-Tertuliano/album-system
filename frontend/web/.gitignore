@@ -3,3 +3,5 @@ dist
 *.local
 .env
 .env.*.local
+android/keystore.properties
+*.keystore

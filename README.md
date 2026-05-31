@@ -1,15 +1,52 @@
 # Album — Álbum digital de figurinhas (Copa do Mundo)
 
-Produto Axellion: aplicativo **web + mobile** para álbuns de figurinhas **personalizados**, foco inicial em **edições da Copa do Mundo FIFA**. O usuário **marca manualmente** quais figurinhas possui; evolução planejada para **todas as edições** no catálogo.
+Produto Axellion: aplicativo **web + mobile (Android APK)** para álbuns de figurinhas da **Copa do Mundo FIFA**. O colecionador **marca manualmente** o que possui; progresso sincronizado por **conta** entre web e app.
 
 ## Documentação
 
-Toda especificação viva do projeto está em [`docs/README.md`](docs/README.md).
+Índice: [`docs/README.md`](docs/README.md)
 
-## Backend (catálogo)
+## Componentes
 
-Implementação inicial em [`backend/README.md`](backend/README.md): API REST, PostgreSQL, seeds JSON com **`album_number`** fiel ao checklist oficial, URLs de capa/figurinha/página.
+| Pasta | Descrição |
+|-------|-----------|
+| [`backend/`](backend/README.md) | API Fastify + PostgreSQL + admin + progresso por usuário |
+| [`frontend/web/`](frontend/web/) | App React (catálogo + estúdio admin na web) |
+| [`frontend/web/MOBILE.md`](frontend/web/MOBILE.md) | Build Capacitor e APK Android |
 
-## Status
+## Status (MVP)
 
-Pré-MVP — documentação + **backend de catálogo** em andamento; auth/progresso/PDF ainda não implementados.
+- Catálogo, import LastSticker, cache de imagens, painel admin
+- Web colecionador: login, progresso %, filtros, repetidas
+- Android: Capacitor + pipeline APK (ver MOBILE.md)
+
+## Início rápido
+
+```bash
+# Backend
+cd backend
+cp .env.example .env
+docker compose up -d
+npm install
+npm run db:migrate
+npm run admin:create -- --email admin@local.test --password "sua-senha"
+npm run dev
+
+# Web
+cd ../frontend/web
+npm install
+npm run dev
+```
+
+API: `http://localhost:3333` · Web: `http://localhost:5173`
+
+## Edições MVP
+
+- `fwc-2014` (seed)
+- `fwc-2018-int` (import LastSticker)
+
+## ADRs
+
+- [ADR-001](docs/technical/adr/ADR-001-backend-stack.md) — Backend Node
+- [ADR-002](docs/technical/adr/ADR-002-admin-hibrido-jwt.md) — Admin JWT
+- [ADR-003](docs/technical/adr/ADR-003-mobile-capacitor.md) — Mobile Capacitor

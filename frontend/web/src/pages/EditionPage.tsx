@@ -1,16 +1,19 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   assetUrl,
   fetchEdition,
   fetchEditionPages,
+  fetchEditionSummary,
   fetchAllStickers,
   updateStickerCollection,
   type AlbumPageRow,
   type Edition,
+  type EditionSummary,
   type StickerSlot,
 } from '../api';
+import { useAuth } from '../auth/AuthContext';
 
 const CATEGORY_PT: Record<string, string> = {
   player: 'Jogador',
@@ -25,6 +28,8 @@ const CATEGORY_PT: Record<string, string> = {
   poster: 'Pôster',
   other: 'Outro',
 };
+
+type OwnershipFilter = 'all' | 'owned' | 'missing';
 
 function categoryLabel(c: string): string {
   return CATEGORY_PT[c] ?? c;
@@ -91,8 +96,8 @@ const EDITION_THEMES: Record<string, EditionTheme> = {
 };
 
 const COVER_OVERRIDE_BY_SLUG: Record<string, string> = {
-  'fwc-2014': '/2014.jpg',
-  'fwc-2018-int': '/2018.png',
+  'fwc-2014': '/static/covers/fwc-2014.jpg',
+  'fwc-2018-int': '/static/covers/fwc-2018-int.png',
 };
 
 function resolveEditionTheme(slug: string | undefined, coverImageUrl?: string | null): CSSProperties {
@@ -138,15 +143,19 @@ function StickerVisual({
 
 export default function EditionPage() {
   const { slug } = useParams<{ slug: string }>();
+  const location = useLocation();
+  const { isAuthenticated } = useAuth();
   const [edition, setEdition] = useState<Edition | null>(null);
   const [pages, setPages] = useState<AlbumPageRow[]>([]);
   const [stickers, setStickers] = useState<StickerSlot[]>([]);
+  const [summary, setSummary] = useState<EditionSummary | null>(null);
   const [totalApi, setTotalApi] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
+  const [ownership, setOwnership] = useState<OwnershipFilter>('all');
 
   useEffect(() => {
     if (!slug) return;
@@ -154,13 +163,30 @@ export default function EditionPage() {
     setLoading(true);
     setErr(null);
 
-    Promise.all([fetchEdition(slug), fetchEditionPages(slug), fetchAllStickers(slug)])
-      .then(([ed, pageRows, { stickers: st, total }]) => {
+    const tasks: Promise<unknown>[] = [
+      fetchEdition(slug),
+      fetchEditionPages(slug),
+      fetchAllStickers(slug),
+    ];
+    if (isAuthenticated) {
+      tasks.push(fetchEditionSummary(slug));
+    }
+
+    Promise.all(tasks)
+      .then((results) => {
         if (cancelled) return;
+        const ed = results[0] as Edition;
+        const pageRows = results[1] as AlbumPageRow[];
+        const stickerResult = results[2] as { stickers: StickerSlot[]; total: number };
         setEdition(ed);
         setPages(pageRows);
-        setStickers(st);
-        setTotalApi(total);
+        setStickers(stickerResult.stickers);
+        setTotalApi(stickerResult.total);
+        if (isAuthenticated && results[3]) {
+          setSummary(results[3] as EditionSummary);
+        } else {
+          setSummary(null);
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
@@ -172,7 +198,26 @@ export default function EditionPage() {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, isAuthenticated]);
+
+  const localSummary = useMemo(() => {
+    const owned = stickers.filter((s) => s.owned).length;
+    const total = stickers.length;
+    const missing = Math.max(total - owned, 0);
+    const percent = total > 0 ? Math.round((owned / total) * 1000) / 10 : 0;
+    return { owned, total, missing, percent };
+  }, [stickers]);
+
+  const progress = summary ?? {
+    edition_id: edition?.id ?? '',
+    owned: localSummary.owned,
+    total: totalApi || localSummary.total,
+    missing: (totalApi || localSummary.total) - localSummary.owned,
+    percent:
+      (totalApi || localSummary.total) > 0
+        ? Math.round((localSummary.owned / (totalApi || localSummary.total)) * 1000) / 10
+        : 0,
+  };
 
   const categories = useMemo(() => {
     const set = new Set(stickers.map((s) => s.category));
@@ -182,6 +227,8 @@ export default function EditionPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return stickers.filter((s) => {
+      if (ownership === 'owned' && !s.owned) return false;
+      if (ownership === 'missing' && s.owned) return false;
       if (category && s.category !== category) return false;
       if (!q) return true;
       return (
@@ -190,7 +237,7 @@ export default function EditionPage() {
         (s.team_name?.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [stickers, query, category]);
+  }, [stickers, query, category, ownership]);
 
   const stickersByPage = useMemo(() => {
     const pageTitleByNumber = new Map(
@@ -228,8 +275,15 @@ export default function EditionPage() {
     });
   }, [filtered, pages]);
 
-  async function patchSticker(stickerId: string, patch: { owned?: boolean }) {
+  async function patchSticker(
+    stickerId: string,
+    patch: { owned?: boolean; duplicate_count?: number }
+  ) {
     if (!slug) return;
+    if (!isAuthenticated) {
+      setSaveErr('Faça login para marcar figurinhas.');
+      return;
+    }
     setSaveErr(null);
     try {
       const updated = await updateStickerCollection(slug, stickerId, patch);
@@ -240,6 +294,17 @@ export default function EditionPage() {
             : s
         )
       );
+      setSummary((prev) => {
+        const total = prev?.total ?? totalApi;
+        const wasOwned = stickers.find((s) => s.id === stickerId)?.owned ?? false;
+        let owned = prev?.owned ?? localSummary.owned;
+        if (patch.owned !== undefined && patch.owned !== wasOwned) {
+          owned += patch.owned ? 1 : -1;
+        }
+        const missing = Math.max(total - owned, 0);
+        const percent = total > 0 ? Math.round((owned / total) * 1000) / 10 : 0;
+        return { edition_id: prev?.edition_id ?? '', total, owned, missing, percent };
+      });
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : 'Falha ao salvar coleção');
     }
@@ -251,7 +316,19 @@ export default function EditionPage() {
   }
 
   function toggleOwned(sticker: StickerSlot) {
+    if (!isAuthenticated) {
+      setSaveErr('Faça login para marcar figurinhas.');
+      return;
+    }
     handleOwnedChange(sticker.id, !sticker.owned);
+  }
+
+  function changeDuplicates(sticker: StickerSlot, delta: number) {
+    const next = Math.max(0, sticker.duplicate_count + delta);
+    setStickers((prev) =>
+      prev.map((s) => (s.id === sticker.id ? { ...s, duplicate_count: next } : s))
+    );
+    void patchSticker(sticker.id, { duplicate_count: next });
   }
 
   if (!slug) {
@@ -274,6 +351,7 @@ export default function EditionPage() {
   }
 
   const themeVars = resolveEditionTheme(edition.slug, edition.cover_image_url);
+  const loginHref = `/login?next=${encodeURIComponent(location.pathname)}`;
 
   return (
     <div className="edition-themed" style={themeVars}>
@@ -283,15 +361,21 @@ export default function EditionPage() {
           <p className="page-sub">
             {edition.year}
             {edition.host_country ? ` · ${edition.host_country}` : ''} · {edition.publisher}
-            {' · '}
-            <strong>{totalApi}</strong> posições no checklist
-            {edition.sticker_total > 0 && edition.sticker_total !== totalApi ? (
-              <span style={{ color: 'var(--muted)' }}>
-                {' '}
-                (total cadastrado na edição: {edition.sticker_total})
-              </span>
-            ) : null}
           </p>
+          <div className="progress-block">
+            <div className="progress-bar-track">
+              <div className="progress-bar-fill" style={{ width: `${progress.percent}%` }} />
+            </div>
+            <p className="progress-stats">
+              <strong>{progress.owned}</strong> de <strong>{progress.total}</strong> ·{' '}
+              <strong>{progress.percent}%</strong> completo · faltam <strong>{progress.missing}</strong>
+            </p>
+          </div>
+          {!isAuthenticated ? (
+            <p className="progress-hint">
+              <Link to={loginHref}>Entre</Link> para salvar o que você tem neste álbum.
+            </p>
+          ) : null}
         </div>
       </section>
 
@@ -314,13 +398,26 @@ export default function EditionPage() {
       </div>
       {saveErr ? <p className="error-box">{saveErr}</p> : null}
 
+      <div className="chips" role="group" aria-label="Filtrar por coleção">
+        {(['all', 'owned', 'missing'] as const).map((f) => (
+          <button
+            key={f}
+            type="button"
+            className={`chip ${ownership === f ? 'chip-active' : ''}`}
+            onClick={() => setOwnership(f)}
+          >
+            {f === 'all' ? 'Todas' : f === 'owned' ? 'Tenho' : 'Faltam'}
+          </button>
+        ))}
+      </div>
+
       <div className="chips" role="group" aria-label="Filtrar por categoria">
         <button
           type="button"
           className={`chip ${category === null ? 'chip-active' : ''}`}
           onClick={() => setCategory(null)}
         >
-          Todas
+          Categorias: todas
         </button>
         {categories.map((c) => (
           <button
@@ -349,30 +446,55 @@ export default function EditionPage() {
                 <article
                   key={s.id}
                   className={`sticker ${s.is_special ? 'sticker-special' : ''} ${s.owned ? 'sticker-owned' : ''}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={s.owned}
-                  aria-label={`${s.owned ? 'Marcar como faltando' : 'Marcar como tenho'}: ${s.album_label} ${s.display_name}`}
-                  onClick={() => toggleOwned(s)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      toggleOwned(s);
-                    }
-                  }}
                 >
-                  <StickerVisual imageUrl={s.image_url} albumLabel={s.album_label} />
-                  <div className="sticker-body">
-                    <div className="sticker-title-row">
-                      <div className="sticker-label">{s.album_label}</div>
-                      {s.owned ? <span className="sticker-owned-badge">Tenho</span> : null}
-                    </div>
-                    <div className="sticker-name">{s.display_name}</div>
-                    <div className="sticker-meta">
-                      {categoryLabel(s.category)}
-                      {s.team_name ? ` · ${s.team_name}` : ''}
+                  <div
+                    className="sticker-tap"
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={s.owned}
+                    onClick={() => toggleOwned(s)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        toggleOwned(s);
+                      }
+                    }}
+                  >
+                    <StickerVisual imageUrl={s.image_url} albumLabel={s.album_label} />
+                    <div className="sticker-body">
+                      <div className="sticker-title-row">
+                        <div className="sticker-label">{s.album_label}</div>
+                        {s.owned ? <span className="sticker-owned-badge">Tenho</span> : null}
+                      </div>
+                      <div className="sticker-name">{s.display_name}</div>
+                      <div className="sticker-meta">
+                        {categoryLabel(s.category)}
+                        {s.team_name ? ` · ${s.team_name}` : ''}
+                      </div>
                     </div>
                   </div>
+                  {isAuthenticated ? (
+                    <div className="sticker-dup-row">
+                      <span>Repetidas</span>
+                      <button
+                        type="button"
+                        className="dup-btn"
+                        aria-label="Menos repetida"
+                        onClick={() => changeDuplicates(s, -1)}
+                      >
+                        −
+                      </button>
+                      <span className="dup-count">{s.duplicate_count}</span>
+                      <button
+                        type="button"
+                        className="dup-btn"
+                        aria-label="Mais repetida"
+                        onClick={() => changeDuplicates(s, 1)}
+                      >
+                        +
+                      </button>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
