@@ -1,24 +1,19 @@
 import { Link } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import { assetUrl, fetchEditions, type Edition } from '../api';
+import TopBar from '../components/TopBar';
+import PullToRefresh from '../components/PullToRefresh';
+import { SkeletonGrid } from '../components/Skeleton';
 
-type CardTheme = {
-  start: string;
-  end: string;
-  accent: string;
-};
+type CardTheme = { accent: string };
 
-const DEFAULT_CARD_THEME: CardTheme = {
-  start: '#1b2a46',
-  end: '#0f172a',
-  accent: 'rgba(52, 211, 153, 0.25)',
-};
+const DEFAULT_CARD_THEME: CardTheme = { accent: 'rgba(52, 211, 153, 0.25)' };
 
 const CARD_THEME_BY_SLUG: Record<string, CardTheme> = {
-  'fwc-2014': { start: '#1b5e3a', end: '#0a2d1f', accent: 'rgba(74, 222, 128, 0.28)' },
-  'fwc-2018-int': { start: '#7f1d1d', end: '#2f1018', accent: 'rgba(248, 113, 113, 0.28)' },
-  'fwc-2022': { start: '#6f1236', end: '#240f1c', accent: 'rgba(244, 63, 94, 0.28)' },
+  'fwc-2014': { accent: 'rgba(74, 222, 128, 0.28)' },
+  'fwc-2018-int': { accent: 'rgba(248, 113, 113, 0.28)' },
+  'fwc-2022': { accent: 'rgba(244, 63, 94, 0.28)' },
 };
 
 const COVER_OVERRIDE_BY_SLUG: Record<string, string> = {
@@ -35,8 +30,6 @@ function cardStyleForEdition(e: Edition): CSSProperties {
       : undefined);
   return {
     '--card-cover-image': cover ? `url("${assetUrl(cover)}")` : 'none',
-    '--card-start': t.start,
-    '--card-end': t.end,
     '--card-accent': t.accent,
   } as CSSProperties;
 }
@@ -45,67 +38,81 @@ export default function HomePage() {
   const [items, setItems] = useState<Edition[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchEditions()
-      .then((rows) => {
-        if (!cancelled) setItems(rows);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    setErr(null);
+    try {
+      const rows = await fetchEditions();
+      setItems(rows);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleRefresh() {
+    await load();
+  }
 
   if (err) {
     return (
-      <div>
-        <h1 className="page-title">Edições</h1>
-        <div className="error-box" role="alert">
-          <strong>Não foi possível conectar à API.</strong>
-          <p style={{ margin: '0.5rem 0 0' }}>
-            Confirme que o backend está em <code>http://localhost:3333</code> e rode{' '}
-            <code>npm run dev</code> nesta pasta (proxy <code>/v1</code>).
-          </p>
-          <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', opacity: 0.9 }}>{err}</p>
+      <div className="page-transition">
+        <TopBar title="Edições" />
+        <div style={{ padding: '0.75rem' }}>
+          <div className="error-box" role="alert">
+            <strong>Não foi possível conectar à API.</strong>
+            <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem' }}>{err}</p>
+          </div>
         </div>
       </div>
     );
   }
 
   if (!items) {
-    return <p className="loading">Carregando edições…</p>;
+    return (
+      <div className="page-transition">
+        <TopBar title="Álbum" />
+        <div style={{ padding: '0.75rem' }}>
+          <SkeletonGrid />
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div>
-      <h1 className="page-title">Edições publicadas</h1>
-      <p className="page-sub">Escolha um álbum para ver o checklist completo.</p>
+    <div className="page-transition">
+      <TopBar title="Álbum" />
 
       {items.length === 0 ? (
-        <p className="page-sub">Nenhuma edição com status <code>published</code>. Importe ou publique no backend.</p>
-      ) : (
-        <div className="grid-editions">
-          {items.map((e) => (
-            <Link
-              key={e.id}
-              to={`/edition/${e.slug}`}
-              className="card-edition"
-              style={cardStyleForEdition(e)}
-            >
-              <h2>{e.name}</h2>
-              <p className="card-meta">
-                {e.year}
-                {e.host_country ? ` · ${e.host_country}` : ''} · {e.publisher}
-              </p>
-              <span className="badge">
-                {e.sticker_total > 0 ? `${e.sticker_total} figurinhas` : 'Catálogo carregando'}
-              </span>
-            </Link>
-          ))}
+        <div style={{ padding: '0 0.75rem' }}>
+          <p className="page-sub">Nenhuma edição disponível.</p>
         </div>
+      ) : (
+        <PullToRefresh onRefresh={handleRefresh}>
+          <div style={{ padding: '0 0.75rem 0.75rem' }}>
+            <div className="grid-editions">
+              {items.map((e) => (
+                <Link
+                  key={e.id}
+                  to={`/edition/${e.slug}`}
+                  className="card-edition"
+                  style={cardStyleForEdition(e)}
+                >
+                  <h2>{e.name}</h2>
+                  <p className="card-meta">
+                    {e.year}
+                    {e.host_country ? ` · ${e.host_country}` : ''}
+                  </p>
+                  <span className="badge">
+                    {e.sticker_total > 0 ? `${e.sticker_total} figurinhas` : 'Carregando'}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </PullToRefresh>
       )}
     </div>
   );

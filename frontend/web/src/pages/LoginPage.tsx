@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import TopBar from '../components/TopBar';
 
 export default function LoginPage() {
   const { login, isAuthenticated } = useAuth();
@@ -30,32 +31,35 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="auth-panel">
-      <h1 className="page-title">Entrar</h1>
-      <p className="page-sub">Salve seu progresso entre web e app mobile.</p>
-      <form className="auth-form" onSubmit={onSubmit}>
-        <label>
-          Email
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        </label>
-        <label>
-          Senha
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
-          />
-        </label>
-        {err ? <p className="error-box">{err}</p> : null}
-        <button type="submit" className="btn-primary" disabled={loading}>
-          {loading ? 'Entrando…' : 'Entrar'}
-        </button>
-      </form>
-      <p className="page-sub">
-        Não tem conta? <Link to="/register">Cadastre-se</Link>
-      </p>
+    <div>
+      <TopBar title="Entrar" backTo="/" />
+      <div className="auth-panel">
+        <p className="page-sub">Salve seu progresso entre dispositivos.</p>
+        <form className="auth-form" onSubmit={onSubmit}>
+          <label>
+            Email
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+          </label>
+          <label>
+            Senha
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={8}
+              autoComplete="current-password"
+            />
+          </label>
+          {err ? <p className="error-box">{err}</p> : null}
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? 'Entrando…' : 'Entrar'}
+          </button>
+        </form>
+        <p className="page-sub" style={{ marginTop: '1rem' }}>
+          Não tem conta? <Link to="/register">Cadastre-se</Link>
+        </p>
+      </div>
     </div>
   );
 }

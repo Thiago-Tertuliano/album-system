@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import TopBar from '../components/TopBar';
 
 export default function RegisterPage() {
   const { register, isAuthenticated } = useAuth();
@@ -29,36 +30,39 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="auth-panel">
-      <h1 className="page-title">Criar conta</h1>
-      <p className="page-sub">Comece a marcar seu álbum digital.</p>
-      <form className="auth-form" onSubmit={onSubmit}>
-        <label>
-          Nome (opcional)
-          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-        </label>
-        <label>
-          Email
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        </label>
-        <label>
-          Senha (mín. 8)
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
-          />
-        </label>
-        {err ? <p className="error-box">{err}</p> : null}
-        <button type="submit" className="btn-primary" disabled={loading}>
-          {loading ? 'Cadastrando…' : 'Cadastrar'}
-        </button>
-      </form>
-      <p className="page-sub">
-        Já tem conta? <Link to="/login">Entrar</Link>
-      </p>
+    <div>
+      <TopBar title="Criar conta" backTo="/login" />
+      <div className="auth-panel">
+        <p className="page-sub">Comece a marcar seu álbum digital.</p>
+        <form className="auth-form" onSubmit={onSubmit}>
+          <label>
+            Nome (opcional)
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name" />
+          </label>
+          <label>
+            Email
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+          </label>
+          <label>
+            Senha (mín. 8)
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={8}
+              autoComplete="new-password"
+            />
+          </label>
+          {err ? <p className="error-box">{err}</p> : null}
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? 'Cadastrando…' : 'Cadastrar'}
+          </button>
+        </form>
+        <p className="page-sub" style={{ marginTop: '1rem' }}>
+          Já tem conta? <Link to="/login">Entrar</Link>
+        </p>
+      </div>
     </div>
   );
 }

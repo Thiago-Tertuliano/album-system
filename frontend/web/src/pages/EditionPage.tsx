@@ -1,5 +1,5 @@
-import { Link, useLocation, useParams } from 'react-router-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import {
   assetUrl,
@@ -14,33 +14,19 @@ import {
   type StickerSlot,
 } from '../api';
 import { useAuth } from '../auth/AuthContext';
-
-const CATEGORY_PT: Record<string, string> = {
-  player: 'Jogador',
-  team_photo: 'Foto equipe',
-  logo: 'Escudo',
-  stadium: 'Estádio',
-  mascot: 'Mascote',
-  legend: 'Lenda',
-  foil: 'Especial / foil',
-  trophy: 'Troféu',
-  intro: 'Intro',
-  poster: 'Pôster',
-  other: 'Outro',
-};
-
-type OwnershipFilter = 'all' | 'owned' | 'missing';
-
-function categoryLabel(c: string): string {
-  return CATEGORY_PT[c] ?? c;
-}
+import TopBar from '../components/TopBar';
+import ProgressBar from '../components/ProgressBar';
+import StickerGrid from '../components/StickerGrid';
+import FilterSheet from '../components/FilterSheet';
+import PullToRefresh from '../components/PullToRefresh';
+import { SkeletonStickerGrid } from '../components/Skeleton';
+import { lightHaptic } from '../lib/haptics';
 
 type EditionTheme = {
   accent: string;
   accentDim: string;
   gold: string;
   surface: string;
-  surfaceHover: string;
   visualStart: string;
   visualEnd: string;
   heroStart: string;
@@ -52,7 +38,6 @@ const DEFAULT_THEME: EditionTheme = {
   accentDim: 'rgba(52, 211, 153, 0.15)',
   gold: '#fbbf24',
   surface: '#141d2e',
-  surfaceHover: '#1a2740',
   visualStart: '#1e293b',
   visualEnd: '#0f172a',
   heroStart: 'rgba(11, 18, 32, 0.86)',
@@ -65,7 +50,6 @@ const EDITION_THEMES: Record<string, EditionTheme> = {
     accentDim: 'rgba(22, 163, 74, 0.18)',
     gold: '#facc15',
     surface: '#10261f',
-    surfaceHover: '#143328',
     visualStart: '#1a5f3a',
     visualEnd: '#0c3322',
     heroStart: 'rgba(12, 51, 34, 0.74)',
@@ -76,7 +60,6 @@ const EDITION_THEMES: Record<string, EditionTheme> = {
     accentDim: 'rgba(239, 68, 68, 0.16)',
     gold: '#f59e0b',
     surface: '#2a0f16',
-    surfaceHover: '#391420',
     visualStart: '#7f1d1d',
     visualEnd: '#3f0d12',
     heroStart: 'rgba(127, 29, 29, 0.68)',
@@ -87,7 +70,6 @@ const EDITION_THEMES: Record<string, EditionTheme> = {
     accentDim: 'rgba(225, 29, 72, 0.18)',
     gold: '#fbbf24',
     surface: '#2a1021',
-    surfaceHover: '#3a1630',
     visualStart: '#6f1236',
     visualEnd: '#2e0f24',
     heroStart: 'rgba(111, 18, 54, 0.68)',
@@ -112,7 +94,6 @@ function resolveEditionTheme(slug: string | undefined, coverImageUrl?: string | 
     '--theme-accent-dim': t.accentDim,
     '--theme-gold': t.gold,
     '--theme-surface': t.surface,
-    '--theme-surface-hover': t.surfaceHover,
     '--theme-visual-start': t.visualStart,
     '--theme-visual-end': t.visualEnd,
     '--theme-hero-start': t.heroStart,
@@ -121,29 +102,10 @@ function resolveEditionTheme(slug: string | undefined, coverImageUrl?: string | 
   } as CSSProperties;
 }
 
-function StickerVisual({
-  imageUrl,
-  albumLabel,
-}: {
-  imageUrl: string | null;
-  albumLabel: string;
-}) {
-  const [failed, setFailed] = useState(false);
-  const showImg = Boolean(imageUrl && !failed);
-  return (
-    <div className="sticker-visual">
-      {showImg ? (
-        <img src={imageUrl!} alt="" loading="lazy" onError={() => setFailed(true)} />
-      ) : (
-        <span className="sticker-placeholder-label">{albumLabel}</span>
-      )}
-    </div>
-  );
-}
+type OwnershipFilter = 'all' | 'owned' | 'missing';
 
 export default function EditionPage() {
   const { slug } = useParams<{ slug: string }>();
-  const location = useLocation();
   const { isAuthenticated } = useAuth();
   const [edition, setEdition] = useState<Edition | null>(null);
   const [pages, setPages] = useState<AlbumPageRow[]>([]);
@@ -156,13 +118,11 @@ export default function EditionPage() {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
   const [ownership, setOwnership] = useState<OwnershipFilter>('all');
+  const [filterOpen, setFilterOpen] = useState(false);
 
-  useEffect(() => {
+  const loadData = useCallback(async () => {
     if (!slug) return;
-    let cancelled = false;
-    setLoading(true);
     setErr(null);
-
     const tasks: Promise<unknown>[] = [
       fetchEdition(slug),
       fetchEditionPages(slug),
@@ -172,33 +132,32 @@ export default function EditionPage() {
       tasks.push(fetchEditionSummary(slug));
     }
 
-    Promise.all(tasks)
-      .then((results) => {
-        if (cancelled) return;
-        const ed = results[0] as Edition;
-        const pageRows = results[1] as AlbumPageRow[];
-        const stickerResult = results[2] as { stickers: StickerSlot[]; total: number };
-        setEdition(ed);
-        setPages(pageRows);
-        setStickers(stickerResult.stickers);
-        setTotalApi(stickerResult.total);
-        if (isAuthenticated && results[3]) {
-          setSummary(results[3] as EditionSummary);
-        } else {
-          setSummary(null);
-        }
-      })
+    const results = await Promise.all(tasks);
+    const ed = results[0] as Edition;
+    const pageRows = results[1] as AlbumPageRow[];
+    const stickerResult = results[2] as { stickers: StickerSlot[]; total: number };
+    setEdition(ed);
+    setPages(pageRows);
+    setStickers(stickerResult.stickers);
+    setTotalApi(stickerResult.total);
+    if (isAuthenticated && results[3]) {
+      setSummary(results[3] as EditionSummary);
+    }
+  }, [slug, isAuthenticated]);
+
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    setLoading(true);
+    loadData()
       .catch((e: unknown) => {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [slug, isAuthenticated]);
+    return () => { cancelled = true; };
+  }, [loadData, slug]);
 
   const localSummary = useMemo(() => {
     const owned = stickers.filter((s) => s.owned).length;
@@ -321,6 +280,7 @@ export default function EditionPage() {
       return;
     }
     handleOwnedChange(sticker.id, !sticker.owned);
+    void lightHaptic();
   }
 
   function changeDuplicates(sticker: StickerSlot, delta: number) {
@@ -331,182 +291,133 @@ export default function EditionPage() {
     void patchSticker(sticker.id, { duplicate_count: next });
   }
 
+  async function handleRefresh() {
+    await loadData();
+  }
+
   if (!slug) {
-    return <p className="error-box">Slug inválido.</p>;
+    return (
+      <div className="page-transition">
+        <TopBar title="Erro" backTo="/" />
+        <div style={{ padding: '0.75rem' }}>
+          <p className="error-box">Slug inválido.</p>
+        </div>
+      </div>
+    );
   }
 
   if (loading) {
-    return <p className="loading">Carregando álbum…</p>;
+    return (
+      <div className="page-transition">
+        <TopBar title="Carregando…" backTo="/" />
+        <div style={{ padding: '0.75rem' }}>
+          <SkeletonStickerGrid />
+        </div>
+      </div>
+    );
   }
 
   if (err || !edition) {
     return (
-      <div>
-        <div className="back-row">
-          <Link to="/">← Voltar</Link>
+      <div className="page-transition">
+        <TopBar title="Erro" backTo="/" />
+        <div style={{ padding: '0.75rem' }}>
+          <div className="error-box">{err ?? 'Edição não encontrada.'}</div>
         </div>
-        <div className="error-box">{err ?? 'Edição não encontrada.'}</div>
       </div>
     );
   }
 
   const themeVars = resolveEditionTheme(edition.slug, edition.cover_image_url);
-  const loginHref = `/login?next=${encodeURIComponent(location.pathname)}`;
+  const hasActiveFilters = ownership !== 'all' || category !== null;
 
   return (
-    <div className="edition-themed" style={themeVars}>
+    <div className="edition-themed page-transition" style={themeVars}>
+      <TopBar title={edition.name} backTo="/" />
+
       <section className="edition-hero">
         <div className="edition-hero-inner">
-          <h1 className="page-title">{edition.name}</h1>
           <p className="page-sub">
             {edition.year}
-            {edition.host_country ? ` · ${edition.host_country}` : ''} · {edition.publisher}
+            {edition.host_country ? ` · ${edition.host_country}` : ''}
           </p>
-          <div className="progress-block">
-            <div className="progress-bar-track">
-              <div className="progress-bar-fill" style={{ width: `${progress.percent}%` }} />
-            </div>
-            <p className="progress-stats">
-              <strong>{progress.owned}</strong> de <strong>{progress.total}</strong> ·{' '}
-              <strong>{progress.percent}%</strong> completo · faltam <strong>{progress.missing}</strong>
-            </p>
-          </div>
+          <ProgressBar owned={progress.owned} total={progress.total} percent={progress.percent} />
           {!isAuthenticated ? (
             <p className="progress-hint">
-              <Link to={loginHref}>Entre</Link> para salvar o que você tem neste álbum.
+              Entre para salvar o que você tem neste álbum.
             </p>
           ) : null}
         </div>
       </section>
 
-      <div className="back-row">
-        <Link to="/">← Todas as edições</Link>
-      </div>
-
-      <div className="toolbar">
+      <div className="toolbar" style={{ paddingLeft: '0.75rem', paddingRight: '0.75rem' }}>
         <input
           className="search"
           type="search"
-          placeholder="Buscar por código, nome ou seleção…"
+          placeholder="Buscar código, nome…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Buscar figurinha"
         />
-        <span className="stats">
-          Mostrando <strong>{filtered.length}</strong> de {stickers.length}
-        </span>
-      </div>
-      {saveErr ? <p className="error-box">{saveErr}</p> : null}
-
-      <div className="chips" role="group" aria-label="Filtrar por coleção">
-        {(['all', 'owned', 'missing'] as const).map((f) => (
-          <button
-            key={f}
-            type="button"
-            className={`chip ${ownership === f ? 'chip-active' : ''}`}
-            onClick={() => setOwnership(f)}
-          >
-            {f === 'all' ? 'Todas' : f === 'owned' ? 'Tenho' : 'Faltam'}
-          </button>
-        ))}
-      </div>
-
-      <div className="chips" role="group" aria-label="Filtrar por categoria">
         <button
           type="button"
-          className={`chip ${category === null ? 'chip-active' : ''}`}
-          onClick={() => setCategory(null)}
+          className={`filter-toggle ${hasActiveFilters ? 'filter-toggle-active' : ''}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Filtrar"
         >
-          Categorias: todas
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="4" y1="6" x2="20" y2="6" />
+            <line x1="8" y1="12" x2="20" y2="12" />
+            <line x1="12" y1="18" x2="20" y2="18" />
+          </svg>
+          {hasActiveFilters ? 'Filtros ativos' : 'Filtrar'}
         </button>
-        {categories.map((c) => (
-          <button
-            key={c}
-            type="button"
-            className={`chip ${category === c ? 'chip-active' : ''}`}
-            onClick={() => setCategory(c)}
-          >
-            {categoryLabel(c)}
-          </button>
-        ))}
+        <span className="stats">
+          {filtered.length}/{stickers.length}
+        </span>
       </div>
 
-      <div className="sticker-page-sections">
-        {stickersByPage.map((section) => (
-          <section key={section.key} className="sticker-page-section">
-            <header className="sticker-page-header">
-              <div>
-                <h2>{section.title || 'Outros'}</h2>
-              </div>
-              <span>{section.stickers.length} figurinhas</span>
-            </header>
+      {saveErr ? <p className="error-box" style={{ margin: '0 0.75rem 0.5rem' }}>{saveErr}</p> : null}
 
-            <div className="grid-stickers">
-              {section.stickers.map((s) => (
-                <article
-                  key={s.id}
-                  className={`sticker ${s.is_special ? 'sticker-special' : ''} ${s.owned ? 'sticker-owned' : ''}`}
-                >
-                  <div
-                    className="sticker-tap"
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={s.owned}
-                    onClick={() => toggleOwned(s)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        toggleOwned(s);
-                      }
-                    }}
-                  >
-                    <StickerVisual imageUrl={s.image_url} albumLabel={s.album_label} />
-                    <div className="sticker-body">
-                      <div className="sticker-title-row">
-                        <div className="sticker-label">{s.album_label}</div>
-                        {s.owned ? <span className="sticker-owned-badge">Tenho</span> : null}
-                      </div>
-                      <div className="sticker-name">{s.display_name}</div>
-                      <div className="sticker-meta">
-                        {categoryLabel(s.category)}
-                        {s.team_name ? ` · ${s.team_name}` : ''}
-                      </div>
-                    </div>
+      <FilterSheet
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        categories={categories}
+        selectedCategory={category}
+        onSelectCategory={setCategory}
+        ownership={ownership}
+        onSelectOwnership={setOwnership}
+      />
+
+      <PullToRefresh onRefresh={handleRefresh}>
+        <div style={{ padding: '0 0.75rem 0.75rem' }}>
+          <div className="sticker-page-sections">
+            {stickersByPage.map((section) => (
+              <section key={section.key} className="sticker-page-section">
+                <header className="sticker-page-header">
+                  <div>
+                    <h2>{section.title || 'Outros'}</h2>
                   </div>
-                  {isAuthenticated ? (
-                    <div className="sticker-dup-row">
-                      <span>Repetidas</span>
-                      <button
-                        type="button"
-                        className="dup-btn"
-                        aria-label="Menos repetida"
-                        onClick={() => changeDuplicates(s, -1)}
-                      >
-                        −
-                      </button>
-                      <span className="dup-count">{s.duplicate_count}</span>
-                      <button
-                        type="button"
-                        className="dup-btn"
-                        aria-label="Mais repetida"
-                        onClick={() => changeDuplicates(s, 1)}
-                      >
-                        +
-                      </button>
-                    </div>
-                  ) : null}
-                </article>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
+                  <span>{section.stickers.length}</span>
+                </header>
 
-      {filtered.length === 0 ? (
-        <p className="page-sub" style={{ marginTop: '1.5rem' }}>
-          Nenhuma figurinha com os filtros atuais.
-        </p>
-      ) : null}
+                <StickerGrid
+                  stickers={section.stickers}
+                  onToggleOwned={toggleOwned}
+                  onChangeDuplicates={changeDuplicates}
+                  isAuthenticated={isAuthenticated}
+                />
+              </section>
+            ))}
+          </div>
+
+          {filtered.length === 0 ? (
+            <p className="page-sub" style={{ marginTop: '1rem' }}>
+              Nenhuma figurinha com os filtros atuais.
+            </p>
+          ) : null}
+        </div>
+      </PullToRefresh>
     </div>
   );
 }

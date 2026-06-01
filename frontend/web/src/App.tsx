@@ -1,4 +1,5 @@
-import { Routes, Route, NavLink, Link } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import HomePage from './pages/HomePage';
 import EditionPage from './pages/EditionPage';
 import LoginPage from './pages/LoginPage';
@@ -7,62 +8,60 @@ import AdminLoginPage from './pages/AdminLoginPage';
 import AdminEditionsPage from './pages/AdminEditionsPage';
 import AdminEditionNewPage from './pages/AdminEditionNewPage';
 import AdminEditionEditPage from './pages/AdminEditionEditPage';
-import { useAuth } from './auth/AuthContext';
+import BottomNav from './components/BottomNav';
+import BackButtonHandler from './components/BackButtonHandler';
 
 const isCollectorApp = import.meta.env.VITE_APP_MODE === 'collector';
 
-export default function App() {
-  const { isAuthenticated, user, logout } = useAuth();
+function AnimatedRoutes() {
+  const location = useLocation();
+  const [displayLocation, setDisplayLocation] = useState(location);
+  const [transitionStage, setTransitionStage] = useState('fadeIn');
+
+  useEffect(() => {
+    if (location.pathname !== displayLocation.pathname) {
+      setTransitionStage('fadeOut');
+    }
+  }, [location, displayLocation]);
 
   return (
+    <div
+      className={`route-transition ${transitionStage}`}
+      onAnimationEnd={() => {
+        if (transitionStage === 'fadeOut') {
+          setDisplayLocation(location);
+          setTransitionStage('fadeIn');
+        }
+      }}
+    >
+      <Routes location={displayLocation}>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/edition/:slug" element={<EditionPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        {!isCollectorApp ? (
+          <>
+            <Route path="/admin/login" element={<AdminLoginPage />} />
+            <Route path="/admin/editions" element={<AdminEditionsPage />} />
+            <Route path="/admin/editions/new" element={<AdminEditionNewPage />} />
+            <Route path="/admin/editions/:id/edit" element={<AdminEditionEditPage />} />
+          </>
+        ) : null}
+      </Routes>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
     <div className="layout">
-      <header className="header">
-        <NavLink to="/" className="brand" end>
-          <span className="brand-mark" aria-hidden>
-            A
-          </span>
-          Album
-        </NavLink>
-        <nav className="top-nav" aria-label="Navegação principal">
-          <NavLink to="/" end>
-            Catálogo
-          </NavLink>
-          {!isCollectorApp ? (
-            <NavLink to="/admin/editions">Estúdio</NavLink>
-          ) : null}
-          {isAuthenticated ? (
-            <>
-              <span className="nav-user">{user?.display_name || user?.email}</span>
-              <button type="button" className="nav-link-btn" onClick={logout}>
-                Sair
-              </button>
-            </>
-          ) : (
-            <Link to="/login">Entrar</Link>
-          )}
-        </nav>
-      </header>
+      <BackButtonHandler />
 
       <main className="main">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/edition/:slug" element={<EditionPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          {!isCollectorApp ? (
-            <>
-              <Route path="/admin/login" element={<AdminLoginPage />} />
-              <Route path="/admin/editions" element={<AdminEditionsPage />} />
-              <Route path="/admin/editions/new" element={<AdminEditionNewPage />} />
-              <Route path="/admin/editions/:id/edit" element={<AdminEditionEditPage />} />
-            </>
-          ) : null}
-        </Routes>
+        <AnimatedRoutes />
       </main>
 
-      <footer className="footer">
-        <p>Catálogo digital de figurinhas · Axellion</p>
-      </footer>
+      <BottomNav />
     </div>
   );
 }
